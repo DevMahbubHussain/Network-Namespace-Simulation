@@ -1,0 +1,56 @@
+Title : Linux Network Namespace Simulation Assignment
+
+Main Objective : 
+Create a network simulation with two separate networks connected via a router using Linux network namespaces and bridges.
+
+Here is the work process of set up two separate networks connected via a router using Linux network namespaces,two bridge,and Ethernet (veth) pairs.
+
+Step 1 : Create Network Namespace
+ip netns add ns1
+ip netns add ns2 
+ip netns add router-ns
+
+This creates 3 custom network namespaces
+1. ns1 (first network)
+2. ns2 (2nd network)
+3. router-ns (Acts as a router between networks)
+
+to verify namespaces created we can use ip netns 
+router-ns
+ns2
+ns1
+
+
+Step 2 : Create network bridge and set up 
+ip link add br0 type bridge
+ip link add br1 type bridge
+ip link set br0 up
+ip link set br1 up
+
+This creates two separate bridge interfaces, br0 and br2, and up this bridge interfaces and  acting as Layer 2 switches.
+
+So, we can see details using ip link show command 
+root@97356b1ef7d8a1cd:~/code# ip link show
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+2: bond0: <BROADCAST,MULTICAST,MASTER> mtu 1500 qdisc noqueue state DOWN mode DEFAULT group default qlen 1000
+    link/ether 06:2c:af:92:d6:59 brd ff:ff:ff:ff:ff:ff
+3: dummy0: <BROADCAST,NOARP> mtu 1500 qdisc noop state DOWN mode DEFAULT group default qlen 1000
+    link/ether 42:a0:30:dd:36:17 brd ff:ff:ff:ff:ff:ff
+4: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP mode DEFAULT group default qlen 1000
+    link/ether 82:b6:9a:e0:d3:38 brd ff:ff:ff:ff:ff:ff
+5: docker0: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 qdisc noqueue state DOWN mode DEFAULT group default 
+    link/ether 02:42:ae:07:f2:96 brd ff:ff:ff:ff:ff:ff
+6: br0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
+    link/ether d2:7a:c0:fd:db:07 brd ff:ff:ff:ff:ff:ff
+7: br1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
+    link/ether 52:77:28:d3:c2:da brd ff:ff:ff:ff:ff:ff
+
+
+Step 3: Create Virtual Ethernet (veth) Pairs
+
+ip link add veth0 type veth peer name veth-br0
+ip link add veth1 type veth peer name veth-br1
+ip link add veth-router0 type veth peer name veth-br0-router
+ip link add veth-router1 type veth peer name veth-br1-router
+
