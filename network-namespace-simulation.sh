@@ -75,7 +75,7 @@ ip netns exec ns1 ip route add default via 192.168.1.1
 ip netns exec ns2 ip route add default via 192.168.2.1
 
 # Enable connectivity test
-echo "Testing connectivity..."
+echo "Testing connectivity"
 ip netns exec ns1 ping  192.168.2.2
 
-echo "Network setup complete!"
+echo "Network setup completed"
