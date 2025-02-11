@@ -54,4 +54,269 @@ ip link add veth1 type veth peer name veth-br1
 ip link add veth-router0 type veth peer name veth-br0-router
 ip link add veth-router1 type veth peer name veth-br1-router
 
- 
+four veth (virtual Ethernet) pairs and each pair acts like a virtual network cable, connecting two virtual network interfaces
+
+1. veth0 <=> veth-br0
+2. veth1 <=> veth-br1
+3. veth-router0 <=> veth-br0-router
+4. veth-router1 <=> veth-br1-router
+
+each pairs consists of two interfaces that act as direct endpoints to each other. if one end receives a packet,
+it is immediatley transmitted to the other end.
+
+
+Step 4: Assign veth interfaces to namespaces
+
+ip link set veth0 netns ns1
+ip link set veth1 netns ns2
+ip link set veth-router0 netns router-ns
+ip link set veth-router1 netns router-ns
+
+ip link set veth0 netns ns1 =>
+* Moves veth0 into the ns1 namespace. This means veth0 will only visible and usable inside ns1.
+* veth-br0 remains in the default namespace(host network) for allowing it act as a connection point for ns1.
+
+ip link set veth1 netns ns2 =>
+* Moves veth1 into the ns2 namespace.
+* veth-br1 stays in the host namespace, linking ns2 to the host.
+
+ip link set veth-router0 netns router-ns =>
+* Moves veth-router0 into the router-ns namespace, which acts as a virtual router.
+* veth-br0-router remains in the host namespace to act as a bridge.
+
+ip link set veth-router1 netns router-ns =>
+* Moves veth-router1 into router-ns, allowing it to handle packets between ns1 and ns2.
+
+Here, Each namespace (ns1, ns2, router-ns) behaves like a seperate  system with its own network stack.
+The router-ns namespace act as a router connecting ns1 and ns2. The Host namespace acts like the external network 
+or bridge.
+
+to verify, interfaces are correctly assigned to namespace : 
+ip netns exec ns1 ip link
+1: lo: <LOOPBACK> mtu 65536 qdisc noop state DOWN mode DEFAULT group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+9: veth0@if8: <BROADCAST,MULTICAST> mtu 1500 qdisc noop state DOWN mode DEFAULT group default qlen 1000
+    link/ether 12:a5:83:d5:1b:65 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+
+ip netns exec ns2 ip link
+1: lo: <LOOPBACK> mtu 65536 qdisc noop state DOWN mode DEFAULT group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+11: veth1@if10: <BROADCAST,MULTICAST> mtu 1500 qdisc noop state DOWN mode DEFAULT group default qlen 1000
+    link/ether 92:ce:1a:b1:87:12 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+
+ ip netns exec router-ns ip link
+ 1: lo: <LOOPBACK> mtu 65536 qdisc noop state DOWN mode DEFAULT group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+13: veth-router0@if12: <BROADCAST,MULTICAST> mtu 1500 qdisc noop state DOWN mode DEFAULT group default qlen 1000
+    link/ether f2:34:d6:6f:8d:6a brd ff:ff:ff:ff:ff:ff link-netnsid 0
+15: veth-router1@if14: <BROADCAST,MULTICAST> mtu 1500 qdisc noop state DOWN mode DEFAULT group default qlen 1000
+    link/ether 2e:88:8b:bc:f4:13 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+We confirmed that all interfcaes are set up in correct way but their state is DOWN we need to  change their state DOWN to UP.
+
+
+Step 4: Bring up interfaces inside each namespace
+
+# inside ns1
+ip netns exec ns1 ip link set veth0 up
+# Inside ns2
+ip netns exec ns2 ip link set veth1 up
+# Inside router-ns
+ip netns exec router-ns ip link set veth-router0 up
+ip netns exec router-ns ip link set veth-router1 up
+
+now we can check their state in now LOWERLAYERDOWN  means that the interfaces are up, but their linked peers are still down. so we need to bring up the bridges and add the veth interfaces to them.    
+
+Step 5 : Connect virtual interfaces to bridges
+
+ip link set veth-br0 master br0
+ip link set veth-br1 master br1
+ip link set veth-br0-router master br0
+ip link set veth-br1-router master br1
+
+To verify, ip link show
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+2: bond0: <BROADCAST,MULTICAST,MASTER> mtu 1500 qdisc noqueue state DOWN mode DEFAULT group default qlen 1000
+    link/ether 52:09:6d:99:cb:9e brd ff:ff:ff:ff:ff:ff
+3: dummy0: <BROADCAST,NOARP> mtu 1500 qdisc noop state DOWN mode DEFAULT group default qlen 1000
+    link/ether 3a:0b:88:c2:c6:21 brd ff:ff:ff:ff:ff:ff
+4: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP mode DEFAULT group default qlen 1000
+    link/ether 7a:4a:85:88:c7:04 brd ff:ff:ff:ff:ff:ff
+5: docker0: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 qdisc noqueue state DOWN mode DEFAULT group default 
+    link/ether 02:42:20:08:28:2e brd ff:ff:ff:ff:ff:ff
+6: br0: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 qdisc noqueue state DOWN mode DEFAULT group default qlen 1000
+    link/ether 4e:c4:89:ea:6b:ba brd ff:ff:ff:ff:ff:ff
+7: br1: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 qdisc noqueue state DOWN mode DEFAULT group default qlen 1000
+    link/ether 06:87:9a:83:8d:3e brd ff:ff:ff:ff:ff:ff
+8: veth-br0@if9: <BROADCAST,MULTICAST> mtu 1500 qdisc noop master br0 state DOWN mode DEFAULT group default qlen 1000
+    link/ether be:7a:a3:05:b4:a5 brd ff:ff:ff:ff:ff:ff link-netns ns1
+10: veth-br1@if11: <BROADCAST,MULTICAST> mtu 1500 qdisc noop master br1 state DOWN mode DEFAULT group default qlen 1000
+    link/ether 06:87:9a:83:8d:3e brd ff:ff:ff:ff:ff:ff link-netns ns2
+12: veth-br0-router@if13: <BROADCAST,MULTICAST> mtu 1500 qdisc noop master br0 state DOWN mode DEFAULT group default qlen 1000
+    link/ether 4e:c4:89:ea:6b:ba brd ff:ff:ff:ff:ff:ff link-netns router-ns
+14: veth-br1-router@if15: <BROADCAST,MULTICAST> mtu 1500 qdisc noop master br1 state DOWN mode DEFAULT group default qlen 1000
+    link/ether 0e:22:67:cf:b6:e2 brd ff:ff:ff:ff:ff:ff link-netns router-ns
+
+Their state is DOWN we need to change their state DOWN to UP.
+
+Step 6 : Bring Up the Bridges and Interfaces
+ip link set veth-br0 up
+ip link set veth-br1 up
+ip link set veth-br0-router up
+ip link set veth-br1-router up
+
+Now agian vaerify their state, we see their state is now UP 
+root@b53cd9e5e5cc4348:~/code# ip link
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+2: bond0: <BROADCAST,MULTICAST,MASTER> mtu 1500 qdisc noqueue state DOWN mode DEFAULT group default qlen 1000
+    link/ether 52:09:6d:99:cb:9e brd ff:ff:ff:ff:ff:ff
+3: dummy0: <BROADCAST,NOARP> mtu 1500 qdisc noop state DOWN mode DEFAULT group default qlen 1000
+    link/ether 3a:0b:88:c2:c6:21 brd ff:ff:ff:ff:ff:ff
+4: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP mode DEFAULT group default qlen 1000
+    link/ether 7a:4a:85:88:c7:04 brd ff:ff:ff:ff:ff:ff
+5: docker0: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 qdisc noqueue state DOWN mode DEFAULT group default 
+    link/ether 02:42:20:08:28:2e brd ff:ff:ff:ff:ff:ff
+6: br0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000
+    link/ether 4e:c4:89:ea:6b:ba brd ff:ff:ff:ff:ff:ff
+7: br1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000
+    link/ether 06:87:9a:83:8d:3e brd ff:ff:ff:ff:ff:ff
+8: veth-br0@if9: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br0 state UP mode DEFAULT group default qlen 1000
+    link/ether be:7a:a3:05:b4:a5 brd ff:ff:ff:ff:ff:ff link-netns ns1
+10: veth-br1@if11: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br1 state UP mode DEFAULT group default qlen 1000
+    link/ether 06:87:9a:83:8d:3e brd ff:ff:ff:ff:ff:ff link-netns ns2
+12: veth-br0-router@if13: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br0 state UP mode DEFAULT group default qlen 1000
+    link/ether 4e:c4:89:ea:6b:ba brd ff:ff:ff:ff:ff:ff link-netns router-ns
+14: veth-br1-router@if15: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br1 state UP mode DEFAULT group default qlen 1000
+    link/ether 0e:22:67:cf:b6:e2 brd ff:ff:ff:ff:ff:ff link-netns router-ns 
+
+Step 7 : Assign IP addresses
+ip netns exec ns1 ip addr add 192.168.1.2/24 dev veth0
+ip netns exec ns2 ip addr add 192.168.2.2/24 dev veth1
+ip netns exec router-ns ip addr add 192.168.1.1/24 dev veth-router0
+ip netns exec router-ns ip addr add 192.168.2.1/24 dev veth-router1
+
+ IP addresses is crucial because it allows different network namespaces (ns1, ns2, router-ns) to communicate using the IP protocol.
+
+ Inside ns1 (Client 1) : 
+ * Device veth0 in ns1 gets 192.168.1.2/24
+ * This makes ns1 part of the 192.168.1.0/24 network.
+ * It will communicate through veth0. 
+
+ Inside ns2 (Client 2) :
+ * Device veth1 in ns2 gets 192.168.2.2/24.
+ * This makes ns2 part of the 192.168.2.0/24 network.
+ * It will communicate through veth1.
+
+ Inside router-ns (Virtual Router)
+ * Device veth-router0 gets 192.168.1.1/24, acting as the gateway for ns1
+ * Device veth-router1 gets 192.168.2.1/24, acting as the gateway for ns2.
+ * This allows router-ns to route packets between ns1 and ns2.
+
+ To verify, ip netns exec ns1 ip addr add 192.168.1.2/24 dev veth0 
+ ip netns exec ns2 ip addr show
+ 1: lo: <LOOPBACK> mtu 65536 qdisc noop state DOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+9: veth0@if8: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
+    link/ether 12:a5:83:d5:1b:65 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 192.168.1.2/24 scope global veth0
+       valid_lft forever preferred_lft forever
+    inet6 fe80::10a5:83ff:fed5:1b65/64 scope link 
+       valid_lft forever preferred_lft forever
+
+for, ip netns exec ns2 ip addr add 192.168.2.2/24 dev veth1
+root@b53cd9e5e5cc4348:~/code# ip netns exec ns2 ip addr show
+1: lo: <LOOPBACK> mtu 65536 qdisc noop state DOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+11: veth1@if10: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
+    link/ether 92:ce:1a:b1:87:12 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 192.168.2.2/24 scope global veth1
+       valid_lft forever preferred_lft forever
+    inet6 fe80::90ce:1aff:feb1:8712/64 scope link 
+       valid_lft forever preferred_lft forever
+
+for, ip netns exec router-ns ip addr add 192.168.1.1/24 dev veth-router0
+root@b53cd9e5e5cc4348:~/code# ip netns exec router-ns ip addr show dev veth-router0
+13: veth-router0@if12: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
+    link/ether f2:34:d6:6f:8d:6a brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 192.168.1.1/24 scope global veth-router0
+       valid_lft forever preferred_lft forever
+    inet6 fe80::f034:d6ff:fe6f:8d6a/64 scope link 
+       valid_lft forever preferred_lft forever
+
+for, ip netns exec router-ns ip addr add 192.168.2.1/24 dev veth-router1
+root@b53cd9e5e5cc4348:~/code# ip netns exec router-ns ip addr show dev veth-router1
+15: veth-router1@if14: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
+    link/ether 2e:88:8b:bc:f4:13 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 192.168.2.1/24 scope global veth-router1
+       valid_lft forever preferred_lft forever
+    inet6 fe80::2c88:8bff:febc:f413/64 scope link 
+       valid_lft forever preferred_lft forever
+
+
+Step 8 : # Bring router namespace interfaces up
+ip netns exec router-ns ip link set lo up
+
+* Enables Localhost Communication Inside router-ns
+
+
+Step 9 : Enable IP Forwarding in Router
+ip netns exec router-ns sysctl -w net.ipv4.ip_forward=1
+
+* Enabling IP forwarding allows router-ns to act as a router between ns1 and ns2.
+
+
+Step 10 : Set up default route for ns1 and ns2 
+ip netns exec ns1 ip route add default via 192.168.1.1
+ip netns exec ns2 ip route add default via 192.168.2.1
+
+* Set up a default gateway for ns1 and ns2.
+
+By default, ns1 and ns2 only know how to reach IP addresses in their own subnet (192.168.1.0/24 and 192.168.2.0/24). They do not know how to reach external networks (including each other).
+
+
+Step 10 : Enable connectivity test
+ip netns exec ns1 ping  192.168.2.2
+ip netns exec ns2 ping  192.168.1.2
+
+
+
+
+
+Debuging :
+Step 1: Check Interface States
+
+ip netns exec ns1 ip link show veth0  (up)
+ip netns exec ns2 ip link show veth1 (up)
+ip netns exec router-ns ip link show veth-router0 (up)
+ip netns exec router-ns ip link show veth-router1 (up)
+
+
+Step 2: Ensure IP Forwarding Is Enabled in router-ns : 
+ip netns exec router-ns sysctl -w net.ipv4.ip_forward=1 
+
+
+Step 3: Check Routing Table in Each Namespace
+
+ip netns exec ns1 ip route show
+default via 192.168.1.1 dev veth0 
+192.168.1.0/24 dev veth0 proto kernel scope link src 192.168.1.2 
+ip netns exec ns2 ip route show
+default via 192.168.2.1 dev veth1 
+192.168.2.0/24 dev veth1 proto kernel scope link src 192.168.2.2 
+ip netns exec router-ns ip route show
+192.168.1.0/24 dev veth-router0 proto kernel scope link src 192.168.1.1 
+192.168.2.0/24 dev veth-router1 proto kernel scope link src 192.168.2.1 
+
+Step 5: Check Firewall Rules (iptables)
+no Firewall block found 
+
+
+Step 6: Check If Packets Are Reaching router-ns
+sudo apt install tcpdump -y
+ip netns exec router-ns tcpdump -i veth-router0 icmp
+ip netns exec router-ns tcpdump -i veth-router1 icmp
+
+Start ping from ns1 to ns2
+
+ip netns exec ns1 ping 192.168.2.2
