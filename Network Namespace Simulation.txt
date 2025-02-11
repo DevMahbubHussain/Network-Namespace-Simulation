@@ -281,6 +281,20 @@ ip netns exec ns2 ping  192.168.1.2
 
 
 
+# IP Addressing Scheme:
+
+ns1: 192.168.1.2/24
+ns2: 192.168.2.2/24
+
+# router-ns:
+
+- 192.168.1.1/24 (br0 side)
+- 192.168.2.1/24 (br1 side)
+
+# Routing Configuration:
+
+Default routes in ns1 and ns2 via router-ns
+IP forwarding enabled in router-ns
 
 
 Debuging :
